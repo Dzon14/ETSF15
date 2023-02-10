@@ -12,10 +12,10 @@
 // Select library
 //
 // uncomment for the physical environment
-//#include <datacommlib.h>
+#include <datacommlib.h>
 //
 // uncomment for the simulated environment
-#include <datacommsimlib.h>
+// #include <datacommsimlib.h>
 
 //
 // Prototypes
@@ -39,7 +39,6 @@ int state = NONE;
 Shield sh; // note! no () since constructor takes no arguments
 Transmit tx;
 Receive rx;
-int led_choice = 0; 
 //////////////////////////////////////////////////////////
 
 //
@@ -85,7 +84,12 @@ void loop() {
 
 		case L2_DATA_SEND:
 			Serial.println("[State] L2_DATA_SEND"); 
-			tx.frame_payload = led_choice;
+			tx.frame_payload = tx.message[MESSAGE_PAYLOAD];
+      tx.frame_to = 0;
+      tx.frame_from = sh.getMyAddress();
+      tx.frame_type = FRAME_TYPE_ACK;
+      tx.frame_seqnum = 0;
+      tx.frame_crc = 0;
 			tx.frame_generation();
 
 			state = L1_SEND;
@@ -102,7 +106,7 @@ void loop() {
 		case L2_FRAME_REC:
 			Serial.println("[State] L2_FRAME_REC");
 			rx.frame_decompose();
-			Serial.println(rx.frame_payload);
+			Serial.println("frame payload: " + rx.frame_payload);
 			state = APP_PRODUCE;
 			break;
 
@@ -122,9 +126,10 @@ void loop() {
 
 		case APP_PRODUCE: 
 			Serial.println("[State] APP_PRODUCE");
-			
+			int led_choice;
 			led_choice = sh.select_led();
 			Serial.println(led_choice);
+      tx.message[MESSAGE_PAYLOAD] = led_choice;
 			state = L2_DATA_SEND;
 
 			// ---
@@ -156,7 +161,9 @@ void loop() {
 //
 void l1_send(unsigned long frame, int framelen) {
 	l1_shift(PREAMBLE_SEQ, LEN_PREAMBLE, 0x80);
+  Serial.println();
 	l1_shift(SFD_SEQ, LEN_SFD, 0x80);
+ Serial.println();
 	l1_shift(frame, framelen, 0x80000000);
 	 
 
@@ -168,7 +175,7 @@ void l1_shift(unsigned long frame, int framelen, unsigned long mask) {
 
 	for (int i = 0; i<framelen; i++) {
 		byte msb = ((frame << (framelen - (i+1))) & mask) == 0 ? 0 : 1;
-		Serial.println(msb);
+		Serial.print(msb);
 		digitalWrite(PIN_TX, msb);
 		delay(T_S);
 	}
@@ -178,28 +185,40 @@ boolean l1_receive(int timeout)
 {
   long start_time = millis();
 
-  while (!sh.sampleRecCh(PIN_RX))
+  while (sh.sampleRecCh(PIN_RX) == 0)
   {
+    
     if (millis() - start_time > timeout)
     {
       return false;
     }
+
+    Serial.print(sh.sampleRecCh(PIN_RX));
   }
 
-  byte buffer = 0;
+  Serial.println();
+
+  byte recievedBuffer = 0x00;
   delay(T_S / 2);
 
+Serial.println("Reading buffer");
   // check that we have recieved the SFD sequence
-  while (buffer != SFD_SEQ)
+  while (recievedBuffer != SFD_SEQ)
   {
+    int start = millis();
+    Serial.println(recievedBuffer, BIN);
     if (millis() - start_time > timeout)
     {
       return false;
     }
-
-    buffer = (buffer << 1) | sh.sampleRecCh(PIN_RX);
+    recievedBuffer = (recievedBuffer << 1) | sh.sampleRecCh(PIN_RX);
     delay(T_S);
   }
+
+  Serial.println();
+  Serial.println("Reading frame");
+
+  Serial.println(recievedBuffer);
 
   // read the frame
   long frame = 0;
@@ -208,6 +227,7 @@ boolean l1_receive(int timeout)
   {
     int rx_bit = sh.sampleRecCh(PIN_RX);
     frame = (frame << 1) | rx_bit;
+    Serial.println(rx_bit);
     digitalWrite(DEB_1, rx_bit);
     delay(T_S);
   }
